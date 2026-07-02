@@ -84,6 +84,24 @@
   .inv-panel.active { display: block; }
 
   /* Add product form */
+  .inv-filter-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .inv-filter-bar .inv-field { flex: 1; min-width: 160px; }
+  .inv-filter-bar select {
+    width: 100%;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--paper);
+    font-family: Georgia, serif;
+    font-size: 14px;
+    color: var(--ink);
+  }
+
   .inv-form {
     background: var(--paper-2);
     border: 1px solid var(--line);
@@ -331,6 +349,8 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
   let sales = [];
   let activeTab = 'inventory';
   let pendingSaleProductId = null;
+  let categoryFilter = 'all';
+  let searchQuery = '';
   let loaded = false;
   let connectionError = '';
 
@@ -525,27 +545,77 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     render();
   }
 
+  async function handleDeleteSale(saleId) {
+    if (!supabaseClient) return;
+    const sale = sales.find(s => s.id === saleId);
+    if (!sale) return;
+
+    const confirmed = window.confirm(
+      `Undo this sale of "${sale.product}"? This will delete the sale record and add 1 back to stock.`
+    );
+    if (!confirmed) return;
+
+    const { error: deleteErr } = await supabaseClient.from('sales').delete().eq('id', saleId);
+    if (deleteErr) {
+      console.error(deleteErr);
+      return;
+    }
+    sales = sales.filter(s => s.id !== saleId);
+
+    // Restore stock on the matching product, if it still exists
+    const product = products.find(p => p.name === sale.product && p.category === sale.category);
+    if (product) {
+      const restoredQty = product.quantity + 1;
+      const { error: updateErr } = await supabaseClient
+        .from('products')
+        .update({ quantity: restoredQty })
+        .eq('id', product.id);
+      if (!updateErr) product.quantity = restoredQty;
+    }
+    render();
+  }
+
   function switchTab(tab) {
     activeTab = tab;
     render();
   }
 
   function renderInventoryPanel() {
-    const groups = groupByCategory();
+    const allGroups = groupByCategory();
+    const allCatNames = Object.keys(allGroups).sort();
+
+    let filteredProducts = products;
+    if (categoryFilter !== 'all') {
+      filteredProducts = filteredProducts.filter(p => p.category === categoryFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filteredProducts = filteredProducts.filter(p => p.name.toLowerCase().includes(q));
+    }
+
+    const groups = {};
+    filteredProducts.forEach(p => {
+      if (!groups[p.category]) groups[p.category] = [];
+      groups[p.category].push(p);
+    });
     const catNames = Object.keys(groups).sort();
 
     let groupsHtml = '';
-    if (catNames.length === 0) {
+    if (products.length === 0) {
       groupsHtml = '<div class="inv-empty">No products yet. Add your first product above to start tracking stock.</div>';
+    } else if (catNames.length === 0) {
+      groupsHtml = '<div class="inv-empty">No products match your search or category filter.</div>';
     } else {
       catNames.forEach(cat => {
         const items = groups[cat];
+        const fullCatList = allGroups[cat] || items;
         let rows = '';
-        items.forEach((p, idx) => {
+        items.forEach(p => {
+          const numInCategory = fullCatList.findIndex(x => x.id === p.id) + 1;
           const low = p.quantity <= 3;
           rows += `
             <div class="inv-row">
-              <span class="inv-num">${idx + 1}.</span>
+              <span class="inv-num">${numInCategory}.</span>
               <span class="inv-name">${escapeHtml(p.name)}</span>
               <span class="inv-price">₱${fmtMoney(p.price)}</span>
               <span class="inv-qty ${low ? 'low' : ''}">
@@ -568,6 +638,22 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     const connErrHtml = connectionError
       ? `<div class="inv-error" style="display:block; margin-bottom:14px;">${escapeHtml(connectionError)}</div>`
       : '';
+
+    const filterBarHtml = `
+      <div class="inv-filter-bar">
+        <div class="inv-field">
+          <label for="inv-search">Search product</label>
+          <input id="inv-search" type="text" value="${escapeHtml(searchQuery)}" placeholder="Type a product name…" />
+        </div>
+        <div class="inv-field">
+          <label for="inv-category-filter">Category</label>
+          <select id="inv-category-filter">
+            <option value="all" ${categoryFilter === 'all' ? 'selected' : ''}>All categories</option>
+            ${allCatNames.map(c => `<option value="${escapeHtml(c)}" ${categoryFilter === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    `;
 
     return `
       ${connErrHtml}
@@ -596,6 +682,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
           <div class="inv-error" id="inv-form-error"></div>
         </form>
       </div>
+      ${filterBarHtml}
       ${groupsHtml}
     `;
   }
@@ -607,7 +694,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
 
     let rows = '';
     if (sales.length === 0) {
-      rows = `<tr><td colspan="4" class="inv-empty">No sales recorded yet. Hit "Sale" on a product to log one.</td></tr>`;
+      rows = `<tr><td colspan="5" class="inv-empty">No sales recorded yet. Hit "Sale" on a product to log one.</td></tr>`;
     } else {
       sales.forEach(s => {
         rows += `
@@ -616,6 +703,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
             <td>${escapeHtml(s.category)}</td>
             <td>${escapeHtml(s.product)}</td>
             <td class="mono">₱${fmtMoney(s.price)}</td>
+            <td><button class="inv-btn inv-btn-danger" data-delete-sale-id="${s.id}" title="Undo this sale">✕</button></td>
           </tr>`;
       });
     }
@@ -642,6 +730,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
             <th>Category</th>
             <th>Product</th>
             <th>Price</th>
+            <th>Undo</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -686,6 +775,10 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
       return;
     }
 
+    const active = document.activeElement;
+    const focusedId = active && active.id ? active.id : null;
+    const focusedSelStart = (active && typeof active.selectionStart === 'number') ? active.selectionStart : null;
+
     root.innerHTML = `
       <div class="inv-header">
         <h1>Stock Ledger</h1>
@@ -713,6 +806,24 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     root.querySelectorAll('[data-delete-id]').forEach(btn => {
       btn.addEventListener('click', () => handleDeleteProduct(btn.dataset.deleteId));
     });
+    root.querySelectorAll('[data-delete-sale-id]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteSale(btn.dataset.deleteSaleId));
+    });
+
+    const searchInput = document.getElementById('inv-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        searchQuery = e.target.value;
+        render();
+      });
+    }
+    const catFilter = document.getElementById('inv-category-filter');
+    if (catFilter) {
+      catFilter.addEventListener('change', (e) => {
+        categoryFilter = e.target.value;
+        render();
+      });
+    }
 
     const saleForm = document.getElementById('inv-sale-form');
     if (saleForm) saleForm.addEventListener('submit', confirmSale);
@@ -723,6 +834,16 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) closeSaleModal();
       });
+    }
+
+    if (focusedId) {
+      const el = document.getElementById(focusedId);
+      if (el && typeof el.focus === 'function') {
+        el.focus();
+        if (focusedSelStart !== null && typeof el.setSelectionRange === 'function') {
+          try { el.setSelectionRange(focusedSelStart, focusedSelStart); } catch (e) {}
+        }
+      }
     }
   }
 
