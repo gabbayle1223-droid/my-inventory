@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stock Ledger — Inventory & Sales</title>
+<style>
+  #inv-root {
+    --ink: #1e2a24;
+    --paper: #f6f3ec;
+    --paper-2: #ece6d8;
+    --line: #cfc6b0;
+    --brass: #9c7a3c;
+    --brass-dark: #7a5f2c;
+    --green: #33553f;
+    --green-dark: #23392b;
+    --red: #a13f2f;
+    --mono: 'Courier New', ui-monospace, monospace;
+    font-family: Georgia, 'Iowan Old Style', serif;
+    color: var(--ink);
+    background: var(--paper);
+    border-radius: 10px;
+    padding: 0;
+    max-width: 900px;
+    margin: 0 auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    overflow: hidden;
+  }
+
+  #inv-root * { box-sizing: border-box; }
+
+  .inv-header {
+    background: var(--green-dark);
+    color: var(--paper);
+    padding: 20px 24px 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 3px double var(--brass);
+  }
+  .inv-header h1 {
+    font-size: 22px;
+    margin: 0;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .inv-header .inv-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    opacity: 0.7;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .inv-tabs {
+    display: flex;
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .inv-tab {
+    flex: 1;
+    padding: 12px 10px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    color: #6b6350;
+    border-bottom: 3px solid transparent;
+    user-select: none;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .inv-tab:hover { color: var(--green-dark); }
+  .inv-tab.active {
+    color: var(--green-dark);
+    border-bottom-color: var(--brass);
+    font-weight: bold;
+  }
+
+  .inv-body { padding: 20px 24px 28px; }
+
+  .inv-panel { display: none; }
+  .inv-panel.active { display: block; }
+
+  /* Add product form */
+  .inv-form {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 22px;
+  }
+  .inv-form-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--brass-dark);
+    margin-bottom: 12px;
+    font-weight: bold;
+  }
+  .inv-form-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 0.8fr 0.7fr auto;
+    gap: 10px;
+    align-items: end;
+  }
+  @media (max-width: 640px) {
+    .inv-form-grid { grid-template-columns: 1fr 1fr; }
+  }
+  .inv-field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6b6350;
+    margin-bottom: 4px;
+  }
+  .inv-field input, .inv-field select {
+    width: 100%;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--paper);
+    font-family: Georgia, serif;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .inv-field input:focus, .inv-field select:focus {
+    outline: none;
+    border-color: var(--brass);
+  }
+  .inv-btn {
+    padding: 9px 16px;
+    border: none;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: filter 0.15s, transform 0.05s;
+    white-space: nowrap;
+  }
+  .inv-btn:active { transform: translateY(1px); }
+  .inv-btn-add { background: var(--green); color: var(--paper); }
+  .inv-btn-add:hover { filter: brightness(1.1); }
+  .inv-btn-sale { background: var(--brass); color: #2a2013; }
+  .inv-btn-sale:hover { filter: brightness(1.08); }
+  .inv-btn-sale:disabled { background: #c9c2ac; color: #8a8368; cursor: not-allowed; }
+
+  .inv-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(30, 42, 36, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+  }
+  .inv-modal {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px;
+    width: 100%;
+    max-width: 340px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  }
+  .inv-modal-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--brass-dark);
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  .inv-modal-product {
+    font-size: 17px;
+    margin-bottom: 14px;
+  }
+  .inv-modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .inv-modal-actions .inv-btn { flex: 1; }
+  .inv-btn-cancel { background: transparent; border: 1px solid var(--line); color: #6b6350; }
+  .inv-btn-cancel:hover { background: var(--paper-2); }
+  .inv-btn-danger { background: transparent; color: var(--red); border: 1px solid var(--red); padding: 6px 10px; font-size: 11px; }
+  .inv-btn-danger:hover { background: var(--red); color: var(--paper); }
+
+  .inv-error { color: var(--red); font-family: var(--mono); font-size: 11px; margin-top: 8px; display: none; }
+
+  /* Category groups */
+  .inv-cat-group { margin-bottom: 20px; }
+  .inv-cat-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--green-dark);
+    font-weight: bold;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 8px;
+  }
+  .inv-cat-count {
+    font-weight: normal;
+    color: #8a8368;
+    letter-spacing: 0;
+  }
+
+  .inv-row {
+    display: grid;
+    grid-template-columns: 28px 1.6fr 0.7fr 0.7fr auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 4px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .inv-row:last-child { border-bottom: none; }
+  .inv-num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--brass-dark);
+    font-weight: bold;
+  }
+  .inv-name { font-size: 15px; }
+  .inv-price, .inv-qty {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .inv-qty.low { color: var(--red); font-weight: bold; }
+  .inv-qty-label { font-size: 9px; color: #8a8368; text-transform: uppercase; letter-spacing: 0.5px; display: block; }
+
+  .inv-empty {
+    text-align: center;
+    padding: 30px 10px;
+    color: #8a8368;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+  }
+
+  /* Dashboard */
+  .inv-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+  .inv-stat {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 12px;
+    text-align: center;
+  }
+  .inv-stat-val {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--green-dark);
+  }
+  .inv-stat-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #8a8368;
+    margin-top: 3px;
+  }
+
+  .inv-sales-table { width: 100%; border-collapse: collapse; }
+  .inv-sales-table th {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #6b6350;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid var(--line);
+  }
+  .inv-sales-table td {
+    padding: 8px 8px;
+    font-size: 13px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .inv-sales-table td.mono { font-family: var(--mono); font-size: 12px; }
+
+  .inv-loading { text-align: center; padding: 40px; color: #8a8368; font-family: var(--mono); font-size: 12px; }
+
+  body {
+    margin: 0;
+    padding: 24px 16px;
+    background: #dcd5c2;
+    min-height: 100vh;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div id="inv-root"></div>
+
+<script>
+// ============================================================
+// SUPABASE CONFIG — paste your own values here (see setup guide)
+// ============================================================
+const SUPABASE_URL = 'https://ldrzdkuzyqzwseqfqgsn.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_ptiTZ3jtxEIDzuZryvWxpw_xiGgOeV9';
+// ============================================================
+
+const supabaseClient = (SUPABASE_URL.startsWith('http'))
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+(function() {
+  const root = document.getElementById('inv-root');
+  let products = [];
+  let sales = [];
+  let activeTab = 'inventory';
+  let pendingSaleProductId = null;
+  let loaded = false;
+  let connectionError = '';
+
+  function mapProduct(row) {
+    return {
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      price: Number(row.price),
+      quantity: row.quantity
+    };
+  }
+
+  function mapSale(row) {
+    return {
+      id: row.id,
+      date: row.date,
+      category: row.category,
+      product: row.product,
+      price: Number(row.price)
+    };
+  }
+
+  async function loadData() {
+    if (!supabaseClient) {
+      connectionError = 'Not connected to a database yet. Add your Supabase URL and key at the top of this file.';
+      loaded = true;
+      render();
+      return;
+    }
+    try {
+      const [{ data: productRows, error: pErr }, { data: saleRows, error: sErr }] = await Promise.all([
+        supabaseClient.from('products').select('*').order('category', { ascending: true }).order('name', { ascending: true }),
+        supabaseClient.from('sales').select('*').order('date', { ascending: false })
+      ]);
+      if (pErr) throw pErr;
+      if (sErr) throw sErr;
+      products = (productRows || []).map(mapProduct);
+      sales = (saleRows || []).map(mapSale);
+      connectionError = '';
+    } catch (e) {
+      console.error(e);
+      connectionError = 'Could not reach the database. Check your Supabase URL/key and table setup.';
+    }
+    loaded = true;
+    render();
+  }
+
+  function subscribeRealtime() {
+    if (!supabaseClient) return;
+    supabaseClient
+      .channel('inventory-shared-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => loadData())
+      .subscribe();
+  }
+
+  function fmtMoney(n) {
+    return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+      ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function groupByCategory() {
+    const groups = {};
+    products.forEach(p => {
+      if (!groups[p.category]) groups[p.category] = [];
+      groups[p.category].push(p);
+    });
+    return groups;
+  }
+
+  async function handleAddProduct(e) {
+    e.preventDefault();
+    const name = document.getElementById('inv-in-name').value.trim();
+    const category = document.getElementById('inv-in-category').value.trim();
+    const price = parseFloat(document.getElementById('inv-in-price').value);
+    const qty = parseInt(document.getElementById('inv-in-qty').value, 10);
+    const errEl = document.getElementById('inv-form-error');
+
+    if (!name || !category) {
+      errEl.textContent = 'Enter both a product name and a category.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (isNaN(price) || price < 0) {
+      errEl.textContent = 'Enter a valid price for this product.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (isNaN(qty) || qty < 0) {
+      errEl.textContent = 'Enter a valid starting quantity.';
+      errEl.style.display = 'block';
+      return;
+    }
+    errEl.style.display = 'none';
+
+    if (!supabaseClient) {
+      errEl.textContent = connectionError;
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    const { data, error } = await supabaseClient
+      .from('products')
+      .insert([{ name, category, price, quantity: qty }])
+      .select();
+
+    if (submitBtn) submitBtn.disabled = false;
+
+    if (error) {
+      errEl.textContent = 'Could not save product: ' + error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+    if (data && data[0]) products.push(mapProduct(data[0]));
+    render();
+  }
+
+  function openSaleModal(productId) {
+    pendingSaleProductId = productId;
+    render();
+  }
+
+  function closeSaleModal() {
+    pendingSaleProductId = null;
+    render();
+  }
+
+  async function confirmSale(e) {
+    e.preventDefault();
+    const productId = pendingSaleProductId;
+    const p = products.find(x => x.id === productId);
+    if (!p || p.quantity <= 0 || !supabaseClient) {
+      closeSaleModal();
+      return;
+    }
+
+    const dateInput = document.getElementById('inv-sale-date').value; // "YYYY-MM-DD"
+    let saleDateISO;
+    if (dateInput) {
+      const now = new Date();
+      const [y, m, d] = dateInput.split('-').map(Number);
+      const combined = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+      saleDateISO = combined.toISOString();
+    } else {
+      saleDateISO = new Date().toISOString();
+    }
+
+    const newQty = p.quantity - 1;
+
+    const { error: updateErr } = await supabaseClient
+      .from('products')
+      .update({ quantity: newQty })
+      .eq('id', productId);
+
+    if (updateErr) {
+      console.error(updateErr);
+      closeSaleModal();
+      return;
+    }
+    p.quantity = newQty;
+
+    const { data: saleData, error: saleErr } = await supabaseClient
+      .from('sales')
+      .insert([{ category: p.category, product: p.name, price: p.price, date: saleDateISO }])
+      .select();
+
+    if (!saleErr && saleData && saleData[0]) {
+      sales.unshift(mapSale(saleData[0]));
+      sales.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
+    pendingSaleProductId = null;
+    render();
+  }
+
+  async function handleDeleteProduct(productId) {
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.from('products').delete().eq('id', productId);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    products = products.filter(x => x.id !== productId);
+    render();
+  }
+
+  function switchTab(tab) {
+    activeTab = tab;
+    render();
+  }
+
+  function renderInventoryPanel() {
+    const groups = groupByCategory();
+    const catNames = Object.keys(groups).sort();
+
+    let groupsHtml = '';
+    if (catNames.length === 0) {
+      groupsHtml = '<div class="inv-empty">No products yet. Add your first product above to start tracking stock.</div>';
+    } else {
+      catNames.forEach(cat => {
+        const items = groups[cat];
+        let rows = '';
+        items.forEach((p, idx) => {
+          const low = p.quantity <= 3;
+          rows += `
+            <div class="inv-row">
+              <span class="inv-num">${idx + 1}.</span>
+              <span class="inv-name">${escapeHtml(p.name)}</span>
+              <span class="inv-price">₱${fmtMoney(p.price)}</span>
+              <span class="inv-qty ${low ? 'low' : ''}">
+                <span class="inv-qty-label">Stock</span>${p.quantity}
+              </span>
+              <button class="inv-btn inv-btn-sale" data-sale-id="${p.id}" ${p.quantity <= 0 ? 'disabled' : ''}>
+                ${p.quantity <= 0 ? 'Out of stock' : 'Sale'}
+              </button>
+              <button class="inv-btn inv-btn-danger" data-delete-id="${p.id}" title="Remove product">✕</button>
+            </div>`;
+        });
+        groupsHtml += `
+          <div class="inv-cat-group">
+            <div class="inv-cat-header">${escapeHtml(cat)} <span class="inv-cat-count">— ${items.length} item${items.length === 1 ? '' : 's'}</span></div>
+            ${rows}
+          </div>`;
+      });
+    }
+
+    const connErrHtml = connectionError
+      ? `<div class="inv-error" style="display:block; margin-bottom:14px;">${escapeHtml(connectionError)}</div>`
+      : '';
+
+    return `
+      ${connErrHtml}
+      <div class="inv-form">
+        <div class="inv-form-title">Add a product</div>
+        <form id="inv-add-form">
+          <div class="inv-form-grid">
+            <div class="inv-field">
+              <label for="inv-in-name">Product name</label>
+              <input id="inv-in-name" type="text" placeholder="e.g. Iced Coffee" />
+            </div>
+            <div class="inv-field">
+              <label for="inv-in-category">Category</label>
+              <input id="inv-in-category" type="text" placeholder="e.g. Drinks" />
+            </div>
+            <div class="inv-field">
+              <label for="inv-in-price">Price (₱)</label>
+              <input id="inv-in-price" type="number" step="0.01" min="0" placeholder="0.00" />
+            </div>
+            <div class="inv-field">
+              <label for="inv-in-qty">Starting stock</label>
+              <input id="inv-in-qty" type="number" step="1" min="0" placeholder="0" />
+            </div>
+            <button type="submit" class="inv-btn inv-btn-add">Add product</button>
+          </div>
+          <div class="inv-error" id="inv-form-error"></div>
+        </form>
+      </div>
+      ${groupsHtml}
+    `;
+  }
+
+  function renderDashboardPanel() {
+    const totalRevenue = sales.reduce((sum, s) => sum + s.price, 0);
+    const totalUnits = sales.length;
+    const totalStockValue = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
+
+    let rows = '';
+    if (sales.length === 0) {
+      rows = `<tr><td colspan="4" class="inv-empty">No sales recorded yet. Hit "Sale" on a product to log one.</td></tr>`;
+    } else {
+      sales.forEach(s => {
+        rows += `
+          <tr>
+            <td class="mono">${fmtDate(s.date)}</td>
+            <td>${escapeHtml(s.category)}</td>
+            <td>${escapeHtml(s.product)}</td>
+            <td class="mono">₱${fmtMoney(s.price)}</td>
+          </tr>`;
+      });
+    }
+
+    return `
+      <div class="inv-stats">
+        <div class="inv-stat">
+          <div class="inv-stat-val">₱${fmtMoney(totalRevenue)}</div>
+          <div class="inv-stat-label">Total revenue</div>
+        </div>
+        <div class="inv-stat">
+          <div class="inv-stat-val">${totalUnits}</div>
+          <div class="inv-stat-label">Units sold</div>
+        </div>
+        <div class="inv-stat">
+          <div class="inv-stat-val">₱${fmtMoney(totalStockValue)}</div>
+          <div class="inv-stat-label">Stock on hand value</div>
+        </div>
+      </div>
+      <table class="inv-sales-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Category</th>
+            <th>Product</th>
+            <th>Price</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderSaleModal() {
+    if (!pendingSaleProductId) return '';
+    const p = products.find(x => x.id === pendingSaleProductId);
+    if (!p) return '';
+    const today = new Date().toISOString().slice(0, 10);
+    return `
+      <div class="inv-modal-overlay" id="inv-modal-overlay">
+        <div class="inv-modal">
+          <div class="inv-modal-title">Record a sale</div>
+          <div class="inv-modal-product">${escapeHtml(p.name)} <span style="color:#8a8368; font-size:12px;">(${escapeHtml(p.category)})</span></div>
+          <form id="inv-sale-form">
+            <div class="inv-field">
+              <label for="inv-sale-date">Date of sale</label>
+              <input id="inv-sale-date" type="date" value="${today}" max="${today}" />
+            </div>
+            <div class="inv-modal-actions">
+              <button type="button" class="inv-btn inv-btn-cancel" id="inv-sale-cancel">Cancel</button>
+              <button type="submit" class="inv-btn inv-btn-sale">Confirm sale</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  function render() {
+    if (!loaded) {
+      root.innerHTML = '<div class="inv-loading">Loading inventory…</div>';
+      return;
+    }
+
+    root.innerHTML = `
+      <div class="inv-header">
+        <h1>Stock Ledger</h1>
+        <div class="inv-sub">Inventory &amp; Sales</div>
+      </div>
+      <div class="inv-tabs">
+        <div class="inv-tab ${activeTab === 'inventory' ? 'active' : ''}" data-tab="inventory">Inventory</div>
+        <div class="inv-tab ${activeTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">Dashboard</div>
+      </div>
+      <div class="inv-body">
+        <div class="inv-panel ${activeTab === 'inventory' ? 'active' : ''}">${renderInventoryPanel()}</div>
+        <div class="inv-panel ${activeTab === 'dashboard' ? 'active' : ''}">${renderDashboardPanel()}</div>
+      </div>
+      ${renderSaleModal()}
+    `;
+
+    root.querySelectorAll('.inv-tab').forEach(el => {
+      el.addEventListener('click', () => switchTab(el.dataset.tab));
+    });
+    const form = document.getElementById('inv-add-form');
+    if (form) form.addEventListener('submit', handleAddProduct);
+    root.querySelectorAll('[data-sale-id]').forEach(btn => {
+      btn.addEventListener('click', () => openSaleModal(btn.dataset.saleId));
+    });
+    root.querySelectorAll('[data-delete-id]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteProduct(btn.dataset.deleteId));
+    });
+
+    const saleForm = document.getElementById('inv-sale-form');
+    if (saleForm) saleForm.addEventListener('submit', confirmSale);
+    const cancelBtn = document.getElementById('inv-sale-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeSaleModal);
+    const overlay = document.getElementById('inv-modal-overlay');
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeSaleModal();
+      });
+    }
+  }
+
+  loadData().then(subscribeRealtime);
+})();
+</script>
+</body>
+</html>
