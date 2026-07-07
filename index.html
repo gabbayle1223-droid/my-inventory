@@ -239,7 +239,7 @@
 
   .inv-row {
     display: grid;
-    grid-template-columns: 28px 1.6fr 0.7fr 0.7fr auto auto;
+    grid-template-columns: 28px 1.6fr 0.7fr 0.7fr auto auto auto;
     align-items: center;
     gap: 10px;
     padding: 9px 4px;
@@ -259,6 +259,13 @@
     color: var(--ink);
   }
   .inv-qty.low { color: var(--red); font-weight: bold; }
+  .inv-price.no-price {
+    color: var(--brass-dark);
+    font-style: italic;
+    font-size: 11px;
+  }
+  .inv-btn-edit { background: transparent; border: 1px solid var(--brass); color: var(--brass-dark); }
+  .inv-btn-edit:hover { background: var(--brass); color: #2a2013; }
   .inv-qty-label { font-size: 9px; color: #8a8368; text-transform: uppercase; letter-spacing: 0.5px; display: block; }
 
   .inv-empty {
@@ -349,6 +356,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
   let sales = [];
   let activeTab = 'inventory';
   let pendingSaleProductId = null;
+  let pendingEditProductId = null;
   let categoryFilter = 'all';
   let searchQuery = '';
   let loaded = false;
@@ -359,7 +367,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
       id: row.id,
       name: row.name,
       category: row.category,
-      price: Number(row.price),
+      price: (row.price === null || row.price === undefined) ? null : Number(row.price),
       quantity: row.quantity
     };
   }
@@ -431,7 +439,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     e.preventDefault();
     const name = document.getElementById('inv-in-name').value.trim();
     const category = document.getElementById('inv-in-category').value.trim();
-    const price = parseFloat(document.getElementById('inv-in-price').value);
+    const priceRaw = document.getElementById('inv-in-price').value.trim();
     const qty = parseInt(document.getElementById('inv-in-qty').value, 10);
     const errEl = document.getElementById('inv-form-error');
 
@@ -440,11 +448,17 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
       errEl.style.display = 'block';
       return;
     }
-    if (isNaN(price) || price < 0) {
-      errEl.textContent = 'Enter a valid price for this product.';
-      errEl.style.display = 'block';
-      return;
+
+    let price = null;
+    if (priceRaw !== '') {
+      price = parseFloat(priceRaw);
+      if (isNaN(price) || price < 0) {
+        errEl.textContent = 'Enter a valid price, or leave it blank to set later.';
+        errEl.style.display = 'block';
+        return;
+      }
     }
+
     if (isNaN(qty) || qty < 0) {
       errEl.textContent = 'Enter a valid starting quantity.';
       errEl.style.display = 'block';
@@ -580,6 +594,80 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     render();
   }
 
+  function openEditModal(productId) {
+    pendingEditProductId = productId;
+    render();
+  }
+
+  function closeEditModal() {
+    pendingEditProductId = null;
+    render();
+  }
+
+  async function confirmEdit(e) {
+    e.preventDefault();
+    const productId = pendingEditProductId;
+    const p = products.find(x => x.id === productId);
+    if (!p || !supabaseClient) {
+      closeEditModal();
+      return;
+    }
+
+    const errEl = document.getElementById('inv-edit-error');
+    const name = document.getElementById('inv-edit-name').value.trim();
+    const category = document.getElementById('inv-edit-category').value.trim();
+    const priceRaw = document.getElementById('inv-edit-price').value.trim();
+    const addStockRaw = document.getElementById('inv-edit-add-stock').value.trim();
+
+    if (!name || !category) {
+      errEl.textContent = 'Product name and category can\'t be empty.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    let price = null;
+    if (priceRaw !== '') {
+      price = parseFloat(priceRaw);
+      if (isNaN(price) || price < 0) {
+        errEl.textContent = 'Enter a valid price, or leave it blank.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
+
+    let addStock = 0;
+    if (addStockRaw !== '') {
+      addStock = parseInt(addStockRaw, 10);
+      if (isNaN(addStock) || addStock < 0) {
+        errEl.textContent = 'Enter a valid number of units to add, or leave it blank.';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
+    errEl.style.display = 'none';
+
+    const newQuantity = p.quantity + addStock;
+
+    const { error } = await supabaseClient
+      .from('products')
+      .update({ name, category, price, quantity: newQuantity })
+      .eq('id', productId);
+
+    if (error) {
+      errEl.textContent = 'Could not save changes: ' + error.message;
+      errEl.style.display = 'block';
+      return;
+    }
+
+    p.name = name;
+    p.category = category;
+    p.price = price;
+    p.quantity = newQuantity;
+
+    pendingEditProductId = null;
+    render();
+  }
+
   function renderInventoryPanel() {
     const allGroups = groupByCategory();
     const allCatNames = Object.keys(allGroups).sort();
@@ -613,17 +701,26 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
         items.forEach(p => {
           const numInCategory = fullCatList.findIndex(x => x.id === p.id) + 1;
           const low = p.quantity <= 3;
+          const hasPrice = p.price !== null && p.price !== undefined;
+          const priceHtml = hasPrice
+            ? `<span class="inv-price">₱${fmtMoney(p.price)}</span>`
+            : `<span class="inv-price no-price">No price set</span>`;
+          const saleDisabled = p.quantity <= 0 || !hasPrice;
+          let saleLabel = 'Sale';
+          if (p.quantity <= 0) saleLabel = 'Out of stock';
+          else if (!hasPrice) saleLabel = 'Set price first';
           rows += `
             <div class="inv-row">
               <span class="inv-num">${numInCategory}.</span>
               <span class="inv-name">${escapeHtml(p.name)}</span>
-              <span class="inv-price">₱${fmtMoney(p.price)}</span>
+              ${priceHtml}
               <span class="inv-qty ${low ? 'low' : ''}">
                 <span class="inv-qty-label">Stock</span>${p.quantity}
               </span>
-              <button class="inv-btn inv-btn-sale" data-sale-id="${p.id}" ${p.quantity <= 0 ? 'disabled' : ''}>
-                ${p.quantity <= 0 ? 'Out of stock' : 'Sale'}
+              <button class="inv-btn inv-btn-sale" data-sale-id="${p.id}" ${saleDisabled ? 'disabled' : ''}>
+                ${saleLabel}
               </button>
+              <button class="inv-btn inv-btn-edit" data-edit-id="${p.id}" title="Edit product">Edit</button>
               <button class="inv-btn inv-btn-danger" data-delete-id="${p.id}" title="Remove product">✕</button>
             </div>`;
         });
@@ -670,8 +767,8 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
               <input id="inv-in-category" type="text" placeholder="e.g. Drinks" />
             </div>
             <div class="inv-field">
-              <label for="inv-in-price">Price (₱)</label>
-              <input id="inv-in-price" type="number" step="0.01" min="0" placeholder="0.00" />
+              <label for="inv-in-price">Price (₱) — optional</label>
+              <input id="inv-in-price" type="number" step="0.01" min="0" placeholder="Leave blank if unknown" />
             </div>
             <div class="inv-field">
               <label for="inv-in-qty">Starting stock</label>
@@ -690,7 +787,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
   function renderDashboardPanel() {
     const totalRevenue = sales.reduce((sum, s) => sum + s.price, 0);
     const totalUnits = sales.length;
-    const totalStockValue = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
+    const totalStockValue = products.reduce((sum, p) => sum + (p.price || 0) * p.quantity, 0);
 
     let rows = '';
     if (sales.length === 0) {
@@ -769,6 +866,44 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     `;
   }
 
+  function renderEditModal() {
+    if (!pendingEditProductId) return '';
+    const p = products.find(x => x.id === pendingEditProductId);
+    if (!p) return '';
+    const priceValue = (p.price === null || p.price === undefined) ? '' : p.price;
+    return `
+      <div class="inv-modal-overlay" id="inv-edit-modal-overlay">
+        <div class="inv-modal">
+          <div class="inv-modal-title">Edit product</div>
+          <div class="inv-modal-product">Currently ${p.quantity} in stock</div>
+          <form id="inv-edit-form">
+            <div class="inv-field" style="margin-bottom:10px;">
+              <label for="inv-edit-name">Product name</label>
+              <input id="inv-edit-name" type="text" value="${escapeHtml(p.name)}" />
+            </div>
+            <div class="inv-field" style="margin-bottom:10px;">
+              <label for="inv-edit-category">Category</label>
+              <input id="inv-edit-category" type="text" value="${escapeHtml(p.category)}" />
+            </div>
+            <div class="inv-field" style="margin-bottom:10px;">
+              <label for="inv-edit-price">Price (₱)</label>
+              <input id="inv-edit-price" type="number" step="0.01" min="0" placeholder="Leave blank if unknown" value="${priceValue}" />
+            </div>
+            <div class="inv-field">
+              <label for="inv-edit-add-stock">Add incoming stock (new batch)</label>
+              <input id="inv-edit-add-stock" type="number" step="1" min="0" placeholder="e.g. 20" />
+            </div>
+            <div class="inv-error" id="inv-edit-error"></div>
+            <div class="inv-modal-actions">
+              <button type="button" class="inv-btn inv-btn-cancel" id="inv-edit-cancel">Cancel</button>
+              <button type="submit" class="inv-btn inv-btn-add">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   function render() {
     if (!loaded) {
       root.innerHTML = '<div class="inv-loading">Loading inventory…</div>';
@@ -793,6 +928,7 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
         <div class="inv-panel ${activeTab === 'dashboard' ? 'active' : ''}">${renderDashboardPanel()}</div>
       </div>
       ${renderSaleModal()}
+      ${renderEditModal()}
     `;
 
     root.querySelectorAll('.inv-tab').forEach(el => {
@@ -802,6 +938,9 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     if (form) form.addEventListener('submit', handleAddProduct);
     root.querySelectorAll('[data-sale-id]').forEach(btn => {
       btn.addEventListener('click', () => openSaleModal(btn.dataset.saleId));
+    });
+    root.querySelectorAll('[data-edit-id]').forEach(btn => {
+      btn.addEventListener('click', () => openEditModal(btn.dataset.editId));
     });
     root.querySelectorAll('[data-delete-id]').forEach(btn => {
       btn.addEventListener('click', () => handleDeleteProduct(btn.dataset.deleteId));
@@ -833,6 +972,17 @@ const supabaseClient = (SUPABASE_URL.startsWith('http'))
     if (overlay) {
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) closeSaleModal();
+      });
+    }
+
+    const editForm = document.getElementById('inv-edit-form');
+    if (editForm) editForm.addEventListener('submit', confirmEdit);
+    const editCancelBtn = document.getElementById('inv-edit-cancel');
+    if (editCancelBtn) editCancelBtn.addEventListener('click', closeEditModal);
+    const editOverlay = document.getElementById('inv-edit-modal-overlay');
+    if (editOverlay) {
+      editOverlay.addEventListener('click', (e) => {
+        if (e.target === editOverlay) closeEditModal();
       });
     }
 
